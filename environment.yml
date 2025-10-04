@@ -1,0 +1,20 @@
+name: rdock-cv
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - numpy
+  - opencv
+  - pip
+  - pip:
+    - boto3
+    - torch
+    - torchvision
+    - torchaudio
+    - matplotlib
+    - einops
+    - scikit-learn
+    - huggingface_hub
+    - safetensors
+    - roma

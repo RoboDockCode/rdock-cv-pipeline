@@ -1,0 +1,6 @@
+[submodule "cosmos-predict2"]
+	path = cosmos-predict2
+	url = git@github.com:nvidia-cosmos/cosmos-predict2.git
+[submodule "models/mast3r"]
+	path = models/mast3r
+	url = https://github.com/naver/mast3r.git
