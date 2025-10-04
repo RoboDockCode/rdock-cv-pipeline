@@ -4,13 +4,12 @@ Simplified automatic 3D reconstruction script
 """
 import cv2 as cv
 import sys
-import time
 from datetime import datetime
 
 sys.path.append('/home/armaan/robodock-repos/rdock-cv-pipeline')
 
 from frame_processing_pipeline.mast3r_processor import MAST3RProcessor
-from frame_processing_pipeline.camera_utils import open_camera
+from frame_processing_pipeline.camera_utils import open_camera, FrameCaptureSession
 from frame_processing_pipeline.ply_utils import merge_ply_files, get_ply_point_count
 
 
@@ -45,41 +44,38 @@ def auto_reconstruction(duration=60, capture_interval=30, output_name=None):
     
     print("✅ Starting capture... Press 'q' to stop early")
     
-    prev_frame = None
-    frame_count = 0
     saved_ply_files = []
-    start_time = time.time()
-    
+    session = FrameCaptureSession(cap, process_interval=10)
+
     try:
         while True:
-            ret, frame = cap.read()
-            if not ret:
+            frame = session.read_frame()
+            if frame is None:
                 break
-            
-            frame_count += 1
-            elapsed = time.time() - start_time
+
+            elapsed = session.get_elapsed_time()
             
             # Check duration
             if elapsed >= duration:
                 print(f"\n⏰ Reached {duration}s duration")
                 break
-            
+
             cv.imshow("Auto Reconstruction - Press 'q' to stop", frame)
-            
+
             # Process frames
-            if prev_frame is not None and frame_count % 10 == 0:
-                results = processor.process_frame_pair(prev_frame, frame)
+            if session.should_process():
+                results = processor.process_frame_pair(session.prev_frame, frame)
                 
-                if results and frame_count % capture_interval == 0:
+                if results and session.frame_count % capture_interval == 0:
                     print(f"📸 Capturing PLY {len(saved_ply_files)+1} ({elapsed:.1f}s)")
-                    ply_file = processor.save_point_cloud(results, frame, frame_count)
+                    ply_file = processor.save_point_cloud(results, frame, session.frame_count)
                     if ply_file:
                         saved_ply_files.append(ply_file)
                         progress = (elapsed / duration) * 100
                         print(f"✅ Progress: {progress:.1f}%")
-            
-            prev_frame = frame.copy()
-            
+
+            session.update_prev_frame(frame)
+
             if cv.waitKey(1) & 0xFF == ord('q'):
                 print(f"\n⏹️  Stopped at {elapsed:.1f}s")
                 break
@@ -87,8 +83,7 @@ def auto_reconstruction(duration=60, capture_interval=30, output_name=None):
     except KeyboardInterrupt:
         print("\n⏹️  Interrupted")
     finally:
-        cap.release()
-        cv.destroyAllWindows()
+        session.release()
     
     # Merge results
     print("\n" + "="*50)
@@ -132,4 +127,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

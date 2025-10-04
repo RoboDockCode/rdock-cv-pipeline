@@ -34,7 +34,40 @@ class MAST3RProcessor:
         except Exception as e:
             print(f"❌ Error loading model: {e}")
             self.model = None
-    
+
+    @staticmethod
+    def _get_primary_prediction(results):
+        """Return the first prediction dict from MAST3R results."""
+        if isinstance(results, dict):
+            return results.get('pred1') or results.get('pred2')
+
+        if isinstance(results, (list, tuple)) and results:
+            candidate = results[0]
+            if isinstance(candidate, dict):
+                return candidate
+
+        return None
+
+    @staticmethod
+    def _tensor_to_numpy(tensor):
+        """Convert torch tensor to numpy array while removing batch dims."""
+        if tensor is None:
+            return None
+
+        if isinstance(tensor, np.ndarray):
+            return tensor
+
+        if torch.is_tensor(tensor):
+            data = tensor.detach().cpu().numpy()
+        else:
+            return None
+
+        if data.ndim == 4:
+            return data[0]
+        if data.ndim == 3 and data.shape[0] == 1:
+            return data[0]
+        return data
+
     def process_frame_pair(self, frame1, frame2):
         """
         Process a pair of frames with MAST3R
@@ -93,34 +126,21 @@ class MAST3RProcessor:
         """
         try:
             # Get the first view's prediction
-            if isinstance(results, dict) and 'pred1' in results:
-                pred = results['pred1']
-            elif isinstance(results, (list, tuple)):
-                pred = results[0]
-            else:
+            pred = self._get_primary_prediction(results)
+            if not pred:
                 return None, None, None
-            
+
             # Extract 3D points
             if 'pts3d' not in pred:
                 return None, None, None
-            
-            pts3d = pred['pts3d']
-            conf = pred.get('conf', None)
-            
-            # Convert tensors to numpy
-            if len(pts3d.shape) == 4:
-                pts3d_np = pts3d[0].cpu().numpy()  # [H, W, 3]
-            else:
-                pts3d_np = pts3d.cpu().numpy()
-            
-            if conf is not None:
-                if len(conf.shape) == 3:
-                    conf_np = conf[0].cpu().numpy()  # [H, W]
-                else:
-                    conf_np = conf.cpu().numpy()
-            else:
-                conf_np = np.ones(pts3d_np.shape[:2])
-            
+
+            pts3d_np = self._tensor_to_numpy(pred['pts3d'])
+            if pts3d_np is None:
+                return None, None, None
+
+            conf = self._tensor_to_numpy(pred.get('conf'))
+            conf_np = conf if conf is not None else np.ones(pts3d_np.shape[:2])
+
             # Get colors from original frame
             h, w = pts3d_np.shape[:2]
             frame_resized = cv.resize(original_frame, (w, h))
@@ -182,23 +202,16 @@ class MAST3RProcessor:
         """
         try:
             # Get the first view's prediction
-            if isinstance(results, dict) and 'pred1' in results:
-                pred = results['pred1']
-            elif isinstance(results, (list, tuple)):
-                pred = results[0]
-            else:
+            pred = self._get_primary_prediction(results)
+            if not pred:
                 return None
-            
+
             if 'pts3d' not in pred:
                 return None
-            
-            pts3d = pred['pts3d']
-            
-            # Convert to numpy
-            if len(pts3d.shape) == 4:
-                pts3d_np = pts3d[0].cpu().numpy()
-            else:
-                pts3d_np = pts3d.cpu().numpy()
+
+            pts3d_np = self._tensor_to_numpy(pred['pts3d'])
+            if pts3d_np is None:
+                return None
             
             # Extract depth (Z component)
             depth_map = pts3d_np[:, :, 2]
@@ -217,4 +230,3 @@ class MAST3RProcessor:
         except Exception as e:
             print(f"❌ Depth visualization error: {e}")
             return None
-

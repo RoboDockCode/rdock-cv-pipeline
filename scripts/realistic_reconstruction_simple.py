@@ -12,6 +12,13 @@ import numpy as np
 import torch
 from datetime import datetime
 
+# Fix CUDA linear algebra backend issue - use magma instead of cusolver
+try:
+    torch.backends.cuda.preferred_linalg_library('magma')
+except RuntimeError:
+    # If magma not available, fall back to CPU for linear algebra
+    torch.backends.cuda.preferred_linalg_library('default')
+
 sys.path.append('/home/armaan/robodock-repos/rdock-cv-pipeline/models/mast3r')
 
 from mast3r.model import AsymmetricMASt3R
@@ -40,11 +47,65 @@ class RealisticReconstructor:
         except Exception as e:
             print(f"❌ Error: {e}")
             self.model = None
-    
+
+    @staticmethod
+    def _prepare_inputs(image_files):
+        """Load images and create inference pairs."""
+        print("📖 Loading images...")
+        imgs = load_images(image_files, size=512, verbose=False)
+
+        print("🔗 Creating pairs...")
+        pairs = make_pairs(imgs, scene_graph='complete', prefilter=None, symmetrize=True)
+        return imgs, pairs
+
+    def _run_inference(self, pairs):
+        """Run MAST3R inference for the prepared pairs."""
+        print("🧠 Running inference...")
+        return inference(pairs, self.model, self.device, batch_size=1, verbose=False)
+
+    def _align_scene(self, inference_output, n_imgs):
+        """Apply global alignment and optional optimization."""
+        print("🌍 Global alignment...")
+        mode = GlobalAlignerMode.PointCloudOptimizer if n_imgs > 2 else GlobalAlignerMode.PairViewer
+        scene = global_aligner(inference_output, device=self.device, mode=mode, verbose=False)
+
+        if mode == GlobalAlignerMode.PointCloudOptimizer:
+            print("⚙️  Optimizing...")
+            loss = scene.compute_global_alignment(init='mst', niter=300, schedule='cosine', lr=0.01)
+            print(f"Final loss: {loss:.6f}")
+
+        return scene
+
+    @staticmethod
+    def _collect_point_cloud(scene):
+        """Extract merged point cloud data from the aligned scene."""
+        print("🎨 Extracting point cloud...")
+        all_points = []
+        all_colors = []
+
+        for i in range(scene.n_imgs):
+            pts3d = scene.get_pts3d()[i]
+            conf = scene.im_conf[i]
+
+            mask = conf > 3.0
+            if mask.sum() == 0:
+                continue
+
+            pts = pts3d[mask].detach().cpu().numpy()
+            colors = (scene.imgs[i][mask].detach().cpu().numpy() * 255).astype(np.uint8)
+
+            all_points.append(pts)
+            all_colors.append(colors)
+
+        if all_points:
+            return np.vstack(all_points), np.vstack(all_colors)
+
+        return None, None
+
     def capture_images(self, duration=30, interval=2.0):
         """Capture image sequence for reconstruction"""
         print(f"📸 Capturing for {duration}s (every {interval}s)")
-        
+
         temp_dir = tempfile.mkdtemp(prefix='mast3r_')
         cap = open_camera()
         if cap is None:
@@ -105,57 +166,18 @@ class RealisticReconstructor:
         print(f"\n🔄 Reconstructing from {len(image_files)} images...")
         
         try:
-            # Load images
-            print("📖 Loading images...")
-            imgs = load_images(image_files, size=512, verbose=False)
-            
-            # Create pairs
-            print("🔗 Creating pairs...")
-            pairs = make_pairs(imgs, scene_graph='complete', prefilter=None, symmetrize=True)
-            
-            # Run inference
-            print("🧠 Running inference...")
-            output = inference(pairs, self.model, self.device, batch_size=1, verbose=False)
-            
-            # Global alignment
-            print("🌍 Global alignment...")
-            mode = GlobalAlignerMode.PointCloudOptimizer if len(imgs) > 2 else GlobalAlignerMode.PairViewer
-            scene = global_aligner(output, device=self.device, mode=mode, verbose=False)
-            
-            if mode == GlobalAlignerMode.PointCloudOptimizer:
-                print("⚙️  Optimizing...")
-                loss = scene.compute_global_alignment(init='mst', niter=300, schedule='cosine', lr=0.01)
-                print(f"Final loss: {loss:.6f}")
-            
-            # Extract point cloud
-            print("🎨 Extracting point cloud...")
-            all_points = []
-            all_colors = []
-            
-            for i in range(scene.n_imgs):
-                pts3d = scene.get_pts3d()[i]
-                conf = scene.im_conf[i]
-                
-                mask = conf > 3.0
-                if mask.sum() == 0:
-                    continue
-                
-                pts = pts3d[mask].detach().cpu().numpy()
-                colors = (scene.imgs[i][mask].detach().cpu().numpy() * 255).astype(np.uint8)
-                
-                all_points.append(pts)
-                all_colors.append(colors)
-            
-            if all_points:
-                points = np.vstack(all_points)
-                colors = np.vstack(all_colors)
-                
+            imgs, pairs = self._prepare_inputs(image_files)
+            inference_output = self._run_inference(pairs)
+            scene = self._align_scene(inference_output, len(imgs))
+            points, colors = self._collect_point_cloud(scene)
+
+            if points is not None and colors is not None:
                 write_ply(output_name, points, colors)
                 print(f"✅ Saved: {output_name} ({len(points):,} points)")
                 return output_name
-            
+
             return None
-            
+
         except Exception as e:
             print(f"❌ Reconstruction failed: {e}")
             import traceback
@@ -210,4 +232,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
