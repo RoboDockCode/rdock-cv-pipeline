@@ -90,7 +90,9 @@ class RealisticReconstructor:
                 continue
 
             pts = pts3d[mask].detach().cpu().numpy()
-            colors = (scene.imgs[i][mask].detach().cpu().numpy() * 255).astype(np.uint8)
+            # Move image to CPU before indexing with mask
+            img_cpu = scene.imgs[i].detach().cpu()
+            colors = (img_cpu[mask.cpu()].numpy() * 255).astype(np.uint8)
 
             all_points.append(pts)
             all_colors.append(colors)
