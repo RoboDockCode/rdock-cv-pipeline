@@ -40,10 +40,41 @@ if result:
     print("✅ SUCCESS!")
     print("="*70)
     print(f"📁 Output: {result}")
-    print(f"\n📥 Download to laptop:")
-    print(f"   scp vm:~/rdock-cv-pipeline/{result} ./")
-    print(f"\n🎨 Visualize on laptop:")
-    print(f"   python scripts/view_ply.py {result}")
+    
+    # Upload to S3
+    print("\n" + "="*70)
+    print("📤 UPLOADING TO S3")
+    print("="*70)
+    
+    try:
+        import boto3
+        from datetime import datetime
+        
+        s3 = boto3.client('s3')
+        bucket_name = 'frame-storage'
+        job_id = capture_dir.split('/')[-1].replace('capture_', 'job_')
+        s3_key = f"output/{job_id}/reconstruction.ply"
+        
+        print(f"📤 Uploading to s3://{bucket_name}/{s3_key}")
+        s3.upload_file(result, bucket_name, s3_key)
+        
+        print(f"✅ Upload complete!")
+        print(f"\n📥 Download on laptop:")
+        print(f"   aws s3 cp s3://{bucket_name}/{s3_key} ./")
+        print(f"\n🎨 Then visualize:")
+        print(f"   python scripts/view_ply.py reconstruction.ply")
+        
+    except ImportError:
+        print("⚠️  boto3 not installed - skipping S3 upload")
+        print(f"\n📥 Download to laptop:")
+        print(f"   scp vm:~/rdock-cv-pipeline/{result} ./")
+    except Exception as e:
+        print(f"⚠️  S3 upload failed: {e}")
+        print("💡 Configure AWS credentials with:")
+        print("   export AWS_ACCESS_KEY_ID='your-key'")
+        print("   export AWS_SECRET_ACCESS_KEY='your-secret'")
+        print(f"\n📥 Alternative - Download to laptop:")
+        print(f"   scp vm:~/rdock-cv-pipeline/{result} ./")
 else:
     print("\n❌ Reconstruction failed")
     sys.exit(1)
