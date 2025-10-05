@@ -14,26 +14,39 @@ def read_ply_file(filename):
     points = []
     colors = []
     confidences = []
+    has_confidence = False
     
     with open(filename, 'rb') as f:
-        # Skip header
+        # Read header to check if confidence field exists
         line = f.readline()
         while line:
+            if b'property float confidence' in line:
+                has_confidence = True
             if line.strip() == b'end_header':
                 break
             line = f.readline()
         
         # Read vertex data
-        while True:
-            data = f.read(19)  # 3*4 + 3*1 + 1*4 = 19 bytes per vertex
-            if len(data) < 19:
-                break
-            
-            # Unpack: 3 floats (xyz), 3 bytes (rgb), 1 float (conf)
-            x, y, z, r, g, b, conf = struct.unpack('<fffBBBf', data)
-            points.append([x, y, z])
-            colors.append([r/255.0, g/255.0, b/255.0])  # Normalize to 0-1
-            confidences.append(conf)
+        if has_confidence:
+            # Format with confidence: 19 bytes per vertex
+            while True:
+                data = f.read(19)  # 3*4 + 3*1 + 1*4 = 19 bytes
+                if len(data) < 19:
+                    break
+                x, y, z, r, g, b, conf = struct.unpack('<fffBBBf', data)
+                points.append([x, y, z])
+                colors.append([r/255.0, g/255.0, b/255.0])
+                confidences.append(conf)
+        else:
+            # Format without confidence: 15 bytes per vertex
+            while True:
+                data = f.read(15)  # 3*4 + 3*1 = 15 bytes
+                if len(data) < 15:
+                    break
+                x, y, z, r, g, b = struct.unpack('<fffBBB', data)
+                points.append([x, y, z])
+                colors.append([r/255.0, g/255.0, b/255.0])
+                confidences.append(1.0)  # Default confidence
     
     return np.array(points), np.array(colors), np.array(confidences)
 
