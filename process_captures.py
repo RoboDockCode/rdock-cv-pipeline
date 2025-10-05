@@ -11,16 +11,21 @@ sys.path.append('models/mast3r')
 sys.path.append('.')
 
 from scripts.realistic_reconstruction_simple import RealisticReconstructor
+import os
 
-# Find your captures
-capture_dir = 'captures/capture_20251004_191045'
+# Find the latest capture automatically
+captures = sorted([d for d in os.listdir('captures') if d.startswith('capture_')])
+if not captures:
+    print("❌ No captures found in captures/")
+    sys.exit(1)
+
+capture_dir = f'captures/{captures[-1]}'  # Latest capture
 images = sorted(glob.glob(f'{capture_dir}/*.jpg'))
 
 if not images:
     print(f"❌ No images found in {capture_dir}")
     print("Available captures:")
-    import os
-    for d in os.listdir('captures'):
+    for d in captures:
         print(f"  - captures/{d}")
     sys.exit(1)
 
