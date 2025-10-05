@@ -85,6 +85,7 @@ class RealisticReconstructor:
             pts3d = scene.get_pts3d()[i]
             conf = scene.im_conf[i]
 
+            # Filter by confidence
             mask = conf > 3.0
             if mask.sum() == 0:
                 continue
@@ -96,6 +97,14 @@ class RealisticReconstructor:
             # Convert mask to CPU numpy if it's a tensor
             mask_np = mask.cpu().numpy() if hasattr(mask, 'cpu') else mask
             colors = (img[mask_np] * 255).astype(np.uint8)
+            
+            # Filter out NaN and infinite values
+            valid = ~(np.isnan(pts).any(axis=1) | np.isinf(pts).any(axis=1))
+            if valid.sum() == 0:
+                continue
+                
+            pts = pts[valid]
+            colors = colors[valid]
 
             all_points.append(pts)
             all_colors.append(colors)
