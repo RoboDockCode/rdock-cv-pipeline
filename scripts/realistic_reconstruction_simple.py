@@ -37,6 +37,14 @@ class RealisticReconstructor:
         print("Loading MAST3R for realistic reconstruction...")
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
+        # Print device info
+        if self.device == 'cuda':
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"🎮 Using GPU: {gpu_name} ({gpu_memory:.1f} GB)")
+        else:
+            print("⚠️  No GPU detected - using CPU (will be slow)")
+        
         try:
             model_name = "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric"
             self.model = AsymmetricMASt3R.from_pretrained(f"naver/{model_name}").to(self.device)
