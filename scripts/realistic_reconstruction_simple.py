@@ -6,8 +6,6 @@ import cv2 as cv
 import sys
 import os
 import time
-import tempfile
-import shutil
 import numpy as np
 import torch
 from datetime import datetime
@@ -106,7 +104,11 @@ class RealisticReconstructor:
         """Capture image sequence for reconstruction"""
         print(f"📸 Capturing for {duration}s (every {interval}s)")
 
-        temp_dir = tempfile.mkdtemp(prefix='mast3r_')
+        # Create captures directory with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        capture_dir = os.path.join("captures", f"capture_{timestamp}")
+        os.makedirs(capture_dir, exist_ok=True)
+        print(f"📁 Saving images to: {capture_dir}")
         cap = open_camera()
         if cap is None:
             return None
@@ -133,7 +135,7 @@ class RealisticReconstructor:
                 
                 # Capture at intervals
                 if current - last_capture >= interval:
-                    img_path = os.path.join(temp_dir, f"img_{len(captured):03d}.jpg")
+                    img_path = os.path.join(capture_dir, f"img_{len(captured):03d}.jpg")
                     cv.imwrite(img_path, frame)
                     captured.append(img_path)
                     last_capture = current
@@ -220,14 +222,12 @@ def main():
         print("🎉 SUCCESS!")
         print("="*50)
         print(f"📁 File: {result}")
+        if images:
+            capture_dir = os.path.dirname(images[0])
+            print(f"📸 Images saved in: {capture_dir}")
         print(f"\n🎨 Visualize: python view_ply.py {result}")
     else:
         print("❌ Reconstruction failed")
-    
-    # Cleanup
-    if images:
-        temp_dir = os.path.dirname(images[0])
-        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
