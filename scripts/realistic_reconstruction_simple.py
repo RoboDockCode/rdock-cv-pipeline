@@ -90,9 +90,12 @@ class RealisticReconstructor:
                 continue
 
             pts = pts3d[mask].detach().cpu().numpy()
-            # Move image to CPU before indexing with mask
-            img_cpu = scene.imgs[i].detach().cpu()
-            colors = (img_cpu[mask.cpu()].numpy() * 255).astype(np.uint8)
+            
+            # scene.imgs[i] is already a numpy array
+            img = scene.imgs[i]
+            # Convert mask to CPU numpy if it's a tensor
+            mask_np = mask.cpu().numpy() if hasattr(mask, 'cpu') else mask
+            colors = (img[mask_np] * 255).astype(np.uint8)
 
             all_points.append(pts)
             all_colors.append(colors)
