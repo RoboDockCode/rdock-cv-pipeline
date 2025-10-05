@@ -87,10 +87,16 @@ class RealisticReconstructor:
 
             # Filter by confidence
             mask = conf > 3.0
+            print(f"  Image {i}: {mask.sum()} points above confidence threshold")
             if mask.sum() == 0:
                 continue
 
             pts = pts3d[mask].detach().cpu().numpy()
+            
+            # Check for NaN before filtering
+            nan_count = np.isnan(pts).any(axis=1).sum()
+            inf_count = np.isinf(pts).any(axis=1).sum()
+            print(f"  Image {i}: {nan_count} NaN points, {inf_count} inf points")
             
             # scene.imgs[i] is already a numpy array
             img = scene.imgs[i]
@@ -101,10 +107,12 @@ class RealisticReconstructor:
             # Filter out NaN and infinite values
             valid = ~(np.isnan(pts).any(axis=1) | np.isinf(pts).any(axis=1))
             if valid.sum() == 0:
+                print(f"  Image {i}: No valid points after NaN filtering!")
                 continue
                 
             pts = pts[valid]
             colors = colors[valid]
+            print(f"  Image {i}: {len(pts)} valid points kept")
 
             all_points.append(pts)
             all_colors.append(colors)
