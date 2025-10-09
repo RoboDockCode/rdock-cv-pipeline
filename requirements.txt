@@ -1,0 +1,30 @@
+# Core dependencies
+torch>=2.0.0
+torchvision
+torchaudio
+
+# Computer Vision
+opencv-python
+Pillow
+
+# Scientific Computing
+numpy
+scipy
+scikit-learn
+einops
+matplotlib
+
+# MAST3R/DUSt3R dependencies
+roma
+trimesh
+pyglet<2
+huggingface-hub[torch]>=0.22
+safetensors
+
+# AWS/S3
+boto3
+
+# Utilities
+tqdm
+tensorboard
+

@@ -1,0 +1,64 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation (keep README and Docker docs)
+docs/
+
+# Output files (will be volume mounted)
+outputs/*.ply
+outputs/*.png
+point_clouds/*.ply
+captures/capture_*/
+
+# Conda
+environment.yml
+activate_env.sh
+
+# Docker directory itself (already copied)
+docker/
+
+# Test files
+**/test_*.py
+**/*_test.py
+
+# Temporary files
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# Large model files (will be downloaded during build)
+models/mast3r/__pycache__/
+models/mast3r/**/__pycache__/
+
+# Deleted files from git status
+PROJECT_STRUCTURE.md
+gpu_auto_reconstruction.ply
+reconstruction.ply
+cosmos-predict2/
+

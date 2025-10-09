@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  reconstruction:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: rdock-cv-pipeline:latest
+    container_name: rdock-cv-reconstruction
+    
+    # GPU support - requires nvidia-docker2
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # AWS credentials (optional, for S3 functionality)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      # Python environment
+      - PYTHONUNBUFFERED=1
+      - TORCH_HOME=/root/.cache/torch
+      - HF_HOME=/root/.cache/huggingface
+    
+    # Volume mounts for data persistence
+    volumes:
+      # Input images
+      - ../captures:/app/captures
+      # Output PLY files
+      - ../outputs:/app/outputs
+      # Point clouds (intermediate)
+      - ../point_clouds:/app/point_clouds
+      # Model cache (persistent across rebuilds)
+      - model-cache:/root/.cache
+      # Development: Mount scripts for live editing
+      - ../scripts:/app/scripts
+      - ../frame_processing_pipeline:/app/frame_processing_pipeline
+      - ../process_captures.py:/app/process_captures.py
+    
+    # Network (for future API)
+    ports:
+      - "8000:8000"
+    
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
+    
+    # Restart policy
+    restart: unless-stopped
+
+# Named volumes for persistent data
+volumes:
+  model-cache:
+    driver: local
+
