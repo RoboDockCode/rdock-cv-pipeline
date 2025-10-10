@@ -87,7 +87,12 @@ class RealisticReconstructor:
             pts3d = scene.get_pts3d()[i]
             conf = scene.im_conf[i]
 
-            mask = conf > 3.0
+            # Use much lower confidence threshold
+            conf_threshold = 1.0
+            mask = conf > conf_threshold
+            
+            print(f"   Image {i+1}/{scene.n_imgs}: confidence range [{conf.min():.2f}, {conf.max():.2f}], {mask.sum()} points above {conf_threshold}")
+            
             if mask.sum() == 0:
                 continue
 
@@ -107,14 +112,20 @@ class RealisticReconstructor:
             
             # Filter out NaN and Inf values
             valid_mask = np.isfinite(pts).all(axis=1)
+            pts_before = len(pts)
             pts = pts[valid_mask]
             colors = colors[valid_mask]
+            
+            if pts_before != len(pts):
+                print(f"   Filtered {pts_before - len(pts)} NaN/Inf points")
             
             if len(pts) > 0:
                 all_points.append(pts)
                 all_colors.append(colors)
 
         if all_points:
+            total_points = sum(len(p) for p in all_points)
+            print(f"✅ Collected {total_points:,} total points from {len(all_points)} images")
             return np.vstack(all_points), np.vstack(all_colors)
 
         return None, None
