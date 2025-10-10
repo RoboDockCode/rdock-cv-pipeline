@@ -61,7 +61,7 @@ class RealisticReconstructor:
     def _run_inference(self, pairs):
         """Run MAST3R inference for the prepared pairs."""
         print("🧠 Running inference...")
-        return inference(pairs, self.model, self.device, batch_size=8, verbose=False)
+        return inference(pairs, self.model, self.device, batch_size=4, verbose=False)
 
     def _align_scene(self, inference_output, n_imgs):
         """Apply global alignment and optional optimization."""
