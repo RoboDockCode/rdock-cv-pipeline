@@ -104,9 +104,15 @@ class RealisticReconstructor:
                 mask_cpu = mask_cpu.numpy()
             
             colors = (img[mask_cpu] * 255).astype(np.uint8)
-
-            all_points.append(pts)
-            all_colors.append(colors)
+            
+            # Filter out NaN and Inf values
+            valid_mask = np.isfinite(pts).all(axis=1)
+            pts = pts[valid_mask]
+            colors = colors[valid_mask]
+            
+            if len(pts) > 0:
+                all_points.append(pts)
+                all_colors.append(colors)
 
         if all_points:
             return np.vstack(all_points), np.vstack(all_colors)
