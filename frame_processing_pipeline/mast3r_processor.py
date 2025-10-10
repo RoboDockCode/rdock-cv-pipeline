@@ -157,6 +157,12 @@ class MAST3RProcessor:
             colors = colors[valid_mask]
             confidences = confidences[valid_mask]
             
+            # Filter out NaN and Inf values
+            finite_mask = np.isfinite(points).all(axis=1)
+            points = points[finite_mask]
+            colors = colors[finite_mask]
+            confidences = confidences[finite_mask]
+            
             return points, colors, confidences
             
         except Exception as e:
