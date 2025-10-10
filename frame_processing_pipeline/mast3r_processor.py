@@ -105,7 +105,7 @@ class MAST3RProcessor:
                 pairs = [(imgs[0], imgs[1])]
                 
                 with torch.no_grad():
-                    results = inference(pairs, self.model, self.device, batch_size=128, verbose=False)
+                    results = inference(pairs, self.model, self.device, batch_size=64, verbose=False)
                     return results
                     
         except Exception as e:
