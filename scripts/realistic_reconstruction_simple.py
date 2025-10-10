@@ -94,10 +94,16 @@ class RealisticReconstructor:
             # Move to CPU before applying mask to avoid CUDA tensor issues
             pts = pts3d[mask].detach().cpu().numpy()
             
-            # Get image colors - ensure on CPU before indexing
-            img = scene.imgs[i].detach().cpu()
-            mask_cpu = mask.cpu()
-            colors = (img[mask_cpu].numpy() * 255).astype(np.uint8)
+            # Get image colors - handle both tensor and numpy array cases
+            img = scene.imgs[i]
+            if torch.is_tensor(img):
+                img = img.detach().cpu().numpy()
+            
+            mask_cpu = mask.cpu() if torch.is_tensor(mask) else mask
+            if torch.is_tensor(mask_cpu):
+                mask_cpu = mask_cpu.numpy()
+            
+            colors = (img[mask_cpu] * 255).astype(np.uint8)
 
             all_points.append(pts)
             all_colors.append(colors)
