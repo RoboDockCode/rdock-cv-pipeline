@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Simplified realistic 3D reconstruction using MAST3R global alignment
+RealisticReconstructor class for MAST3R-based 3D reconstruction
+Used by process_captures.py and infer_from_s3.py
 """
-import cv2 as cv
 import sys
 import os
-import time
 import numpy as np
 import torch
 from datetime import datetime
@@ -18,7 +17,6 @@ except RuntimeError:
     torch.backends.cuda.preferred_linalg_library('default')
 
 # Add the project root and models directory to Python path
-import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'models', 'mast3r'))
 sys.path.append(project_root)
@@ -28,7 +26,6 @@ from dust3r.utils.image import load_images
 from dust3r.image_pairs import make_pairs
 from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.inference import inference
-from frame_processing_pipeline.camera_utils import open_camera
 from frame_processing_pipeline.ply_utils import write_ply
 
 
@@ -137,62 +134,6 @@ class RealisticReconstructor:
             return np.vstack(all_points), np.vstack(all_colors)
 
         return None, None
-
-    def capture_images(self, duration=30, interval=2.0):
-        """Capture image sequence for reconstruction"""
-        print(f"📸 Capturing for {duration}s (every {interval}s)")
-
-        # Create captures directory with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        capture_dir = os.path.join("captures", f"capture_{timestamp}")
-        os.makedirs(capture_dir, exist_ok=True)
-        print(f"📁 Saving images to: {capture_dir}")
-        cap = open_camera()
-        if cap is None:
-            return None
-        
-        captured = []
-        start_time = time.time()
-        last_capture = 0
-        
-        print("🎥 Move camera around the scene! Press 'q' to stop")
-        
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                current = time.time()
-                elapsed = current - start_time
-                
-                if elapsed >= duration:
-                    break
-                
-                cv.imshow("Capturing - Press 'q' to stop", frame)
-                
-                # Capture at intervals
-                if current - last_capture >= interval:
-                    img_path = os.path.join(capture_dir, f"img_{len(captured):03d}.jpg")
-                    cv.imwrite(img_path, frame)
-                    captured.append(img_path)
-                    last_capture = current
-                    
-                    progress = (elapsed / duration) * 100
-                    print(f"📸 Image {len(captured)} ({progress:.1f}%)")
-                
-                if cv.waitKey(1) & 0xFF == ord('q'):
-                    print("⏹️  Stopped early")
-                    break
-                    
-        except KeyboardInterrupt:
-            print("⏹️  Interrupted")
-        finally:
-            cap.release()
-            cv.destroyAllWindows()
-        
-        print(f"✅ Captured {len(captured)} images")
-        return captured if len(captured) >= 2 else None
     
     def reconstruct(self, image_files, output_name=None):
         """Create realistic reconstruction with global alignment"""
@@ -223,50 +164,3 @@ class RealisticReconstructor:
             import traceback
             traceback.print_exc()
             return None
-
-
-def main():
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Realistic 3D Reconstruction')
-    parser.add_argument('--duration', '-d', type=int, default=30,
-                       help='Capture duration (default: 30s)')
-    parser.add_argument('--interval', '-i', type=float, default=2.0,
-                       help='Capture interval (default: 2.0s)')
-    parser.add_argument('--output', '-o', type=str,
-                       help='Output filename')
-    
-    args = parser.parse_args()
-    
-    print("🎬 REALISTIC 3D RECONSTRUCTION")
-    print("="*50)
-    
-    reconstructor = RealisticReconstructor()
-    if reconstructor.model is None:
-        print("❌ Failed to load model")
-        return
-    
-    # Capture images
-    images = reconstructor.capture_images(args.duration, args.interval)
-    if not images:
-        print("❌ Failed to capture images")
-        return
-    
-    # Reconstruct
-    result = reconstructor.reconstruct(images, args.output)
-    
-    if result:
-        print("\n" + "="*50)
-        print("🎉 SUCCESS!")
-        print("="*50)
-        print(f"📁 File: {result}")
-        if images:
-            capture_dir = os.path.dirname(images[0])
-            print(f"📸 Images saved in: {capture_dir}")
-        print(f"\n🎨 Visualize: python view_ply.py {result}")
-    else:
-        print("❌ Reconstruction failed")
-
-
-if __name__ == "__main__":
-    main()
