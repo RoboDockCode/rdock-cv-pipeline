@@ -105,7 +105,7 @@ class MAST3RProcessor:
                 pairs = [(imgs[0], imgs[1])]
                 
                 with torch.no_grad():
-                    results = inference(pairs, self.model, self.device, batch_size=1, verbose=False)
+                    results = inference(pairs, self.model, self.device, batch_size=64, verbose=False)
                     return results
                     
         except Exception as e:
@@ -156,6 +156,12 @@ class MAST3RProcessor:
             points = points[valid_mask]
             colors = colors[valid_mask]
             confidences = confidences[valid_mask]
+            
+            # Filter out NaN and Inf values
+            finite_mask = np.isfinite(points).all(axis=1)
+            points = points[finite_mask]
+            colors = colors[finite_mask]
+            confidences = confidences[finite_mask]
             
             return points, colors, confidences
             

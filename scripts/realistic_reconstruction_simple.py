@@ -67,7 +67,7 @@ class RealisticReconstructor:
     def _run_inference(self, pairs):
         """Run MAST3R inference for the prepared pairs."""
         print("🧠 Running inference...")
-        return inference(pairs, self.model, self.device, batch_size=1, verbose=False)
+        return inference(pairs, self.model, self.device, batch_size=64, verbose=False)
 
     def _align_scene(self, inference_output, n_imgs):
         """Apply global alignment and optional optimization."""
@@ -93,39 +93,45 @@ class RealisticReconstructor:
             pts3d = scene.get_pts3d()[i]
             conf = scene.im_conf[i]
 
-            # Filter by confidence
-            mask = conf > 3.0
-            print(f"  Image {i}: {mask.sum()} points above confidence threshold")
+            # Use much lower confidence threshold
+            conf_threshold = 1.0
+            mask = conf > conf_threshold
+            
+            print(f"   Image {i+1}/{scene.n_imgs}: confidence range [{conf.min():.2f}, {conf.max():.2f}], {mask.sum()} points above {conf_threshold}")
+            
             if mask.sum() == 0:
                 continue
 
+            # Move to CPU before applying mask to avoid CUDA tensor issues
             pts = pts3d[mask].detach().cpu().numpy()
             
-            # Check for NaN before filtering
-            nan_count = np.isnan(pts).any(axis=1).sum()
-            inf_count = np.isinf(pts).any(axis=1).sum()
-            print(f"  Image {i}: {nan_count} NaN points, {inf_count} inf points")
-            
-            # scene.imgs[i] is already a numpy array
+            # Get image colors - handle both tensor and numpy array cases
             img = scene.imgs[i]
-            # Convert mask to CPU numpy if it's a tensor
-            mask_np = mask.cpu().numpy() if hasattr(mask, 'cpu') else mask
-            colors = (img[mask_np] * 255).astype(np.uint8)
+            if torch.is_tensor(img):
+                img = img.detach().cpu().numpy()
             
-            # Filter out NaN and infinite values
-            valid = ~(np.isnan(pts).any(axis=1) | np.isinf(pts).any(axis=1))
-            if valid.sum() == 0:
-                print(f"  Image {i}: No valid points after NaN filtering!")
-                continue
-                
-            pts = pts[valid]
-            colors = colors[valid]
-            print(f"  Image {i}: {len(pts)} valid points kept")
-
-            all_points.append(pts)
-            all_colors.append(colors)
+            mask_cpu = mask.cpu() if torch.is_tensor(mask) else mask
+            if torch.is_tensor(mask_cpu):
+                mask_cpu = mask_cpu.numpy()
+            
+            colors = (img[mask_cpu] * 255).astype(np.uint8)
+            
+            # Filter out NaN and Inf values
+            valid_mask = np.isfinite(pts).all(axis=1)
+            pts_before = len(pts)
+            pts = pts[valid_mask]
+            colors = colors[valid_mask]
+            
+            if pts_before != len(pts):
+                print(f"   Filtered {pts_before - len(pts)} NaN/Inf points")
+            
+            if len(pts) > 0:
+                all_points.append(pts)
+                all_colors.append(colors)
 
         if all_points:
+            total_points = sum(len(p) for p in all_points)
+            print(f"✅ Collected {total_points:,} total points from {len(all_points)} images")
             return np.vstack(all_points), np.vstack(all_colors)
 
         return None, None
