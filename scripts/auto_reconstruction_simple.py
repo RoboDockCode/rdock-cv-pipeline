@@ -6,7 +6,10 @@ import cv2 as cv
 import sys
 from datetime import datetime
 
-sys.path.append('/home/armaan/robodock-repos/rdock-cv-pipeline')
+# Add project root to path
+import os
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
 
 from frame_processing_pipeline.mast3r_processor import MAST3RProcessor
 from frame_processing_pipeline.camera_utils import open_camera, FrameCaptureSession

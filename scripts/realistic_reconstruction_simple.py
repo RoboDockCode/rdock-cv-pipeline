@@ -17,15 +17,17 @@ except RuntimeError:
     # If magma not available, fall back to CPU for linear algebra
     torch.backends.cuda.preferred_linalg_library('default')
 
-sys.path.append('/home/armaan/robodock-repos/rdock-cv-pipeline/models/mast3r')
+# Add the project root and models directory to Python path
+import os
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'models', 'mast3r'))
+sys.path.append(project_root)
 
 from mast3r.model import AsymmetricMASt3R
 from dust3r.utils.image import load_images
 from dust3r.image_pairs import make_pairs
 from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.inference import inference
-
-sys.path.append('/home/armaan/robodock-repos/rdock-cv-pipeline')
 from frame_processing_pipeline.camera_utils import open_camera
 from frame_processing_pipeline.ply_utils import write_ply
 

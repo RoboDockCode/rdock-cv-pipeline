@@ -8,7 +8,8 @@ import tempfile
 from PIL import Image
 
 # Add MAST3R to path
-sys.path.append('/home/armaan/robodock-repos/rdock-cv-pipeline/models/mast3r')
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(project_root, 'models', 'mast3r'))
 
 from mast3r.model import AsymmetricMASt3R
 import mast3r.utils.path_to_dust3r  # noqa
