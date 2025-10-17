@@ -274,6 +274,7 @@ def main():
                 print("❌ Failed to load MASt3R-SLAM model")
                 return 1
             
+            # SLAM will use extracted frames (MP4 has codec issues)
             result = reconstructor.reconstruct(frames, output_ply)
             
             if not result or not result['success']:
