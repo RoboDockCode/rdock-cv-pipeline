@@ -15,6 +15,12 @@ import platform
 import tempfile
 import re
 import time
+from scipy.spatial.distance import cdist
+from scipy.ndimage import gaussian_filter
+from scipy.spatial import Delaunay
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 
 def read_ply_file(filename):
     """Read PLY file and return points, colors, confidences"""
@@ -57,8 +63,397 @@ def read_ply_file(filename):
     
     return np.array(points), np.array(colors), np.array(confidences)
 
-def visualize_ply(filename, max_points=100000):
-    """Visualize PLY file with matplotlib"""
+
+def enhance_point_cloud_gaussian(points, colors, confidences, voxel_size=0.01, sigma=0.05, max_points=50000):
+    """
+    Fill gaps in point cloud using Gaussian color interpolation
+    
+    Args:
+        points: Nx3 array of 3D coordinates
+        colors: Nx3 array of RGB colors (0-1 range)
+        confidences: N array of confidence values
+        voxel_size: Size of voxel grid for interpolation
+        sigma: Gaussian kernel standard deviation
+        max_points: Maximum points to process (for performance)
+    
+    Returns:
+        enhanced_points, enhanced_colors, enhanced_confidences
+    """
+    print(f"🎨 Enhancing point cloud with Gaussian interpolation...")
+    print(f"   Input points: {len(points)}")
+    print(f"   Voxel size: {voxel_size}")
+    print(f"   Gaussian sigma: {sigma}")
+    
+    # Subsample if too many points for performance
+    if len(points) > max_points:
+        indices = np.random.choice(len(points), max_points, replace=False)
+        points = points[indices]
+        colors = colors[indices]
+        confidences = confidences[indices]
+        print(f"   Subsampled to {max_points} points for processing")
+    
+    # Create voxel grid
+    min_coords = points.min(axis=0)
+    max_coords = points.max(axis=0)
+    
+    # Calculate grid dimensions
+    grid_size = ((max_coords - min_coords) / voxel_size).astype(int) + 1
+    print(f"   Grid size: {grid_size}")
+    
+    # Create voxel coordinates
+    voxel_coords = ((points - min_coords) / voxel_size).astype(int)
+    
+    # Create 3D grid for colors and confidences
+    color_grid = np.zeros((grid_size[0], grid_size[1], grid_size[2], 3))
+    confidence_grid = np.zeros((grid_size[0], grid_size[1], grid_size[2]))
+    weight_grid = np.zeros((grid_size[0], grid_size[1], grid_size[2]))
+    
+    # Fill grid with original points
+    for i, (voxel, color, conf) in enumerate(zip(voxel_coords, colors, confidences)):
+        if 0 <= voxel[0] < grid_size[0] and 0 <= voxel[1] < grid_size[1] and 0 <= voxel[2] < grid_size[2]:
+            color_grid[voxel[0], voxel[1], voxel[2]] = color
+            confidence_grid[voxel[0], voxel[1], voxel[2]] = conf
+            weight_grid[voxel[0], voxel[1], voxel[2]] = 1.0
+    
+    # Apply Gaussian smoothing to fill gaps
+    print(f"   Applying Gaussian smoothing...")
+    for channel in range(3):
+        color_grid[:, :, :, channel] = gaussian_filter(color_grid[:, :, :, channel], sigma=sigma)
+    
+    confidence_grid = gaussian_filter(confidence_grid, sigma=sigma)
+    weight_grid = gaussian_filter(weight_grid, sigma=sigma)
+    
+    # Extract enhanced points
+    enhanced_points = []
+    enhanced_colors = []
+    enhanced_confidences = []
+    
+    # Threshold for inclusion (avoid very low confidence interpolated points)
+    confidence_threshold = 0.1
+    
+    for i in range(grid_size[0]):
+        for j in range(grid_size[1]):
+            for k in range(grid_size[2]):
+                if weight_grid[i, j, k] > 0.1:  # Only include voxels with sufficient weight
+                    # Convert back to world coordinates
+                    world_coord = min_coords + np.array([i, j, k]) * voxel_size
+                    
+                    # Check confidence threshold
+                    if confidence_grid[i, j, k] > confidence_threshold:
+                        enhanced_points.append(world_coord)
+                        enhanced_colors.append(color_grid[i, j, k])
+                        enhanced_confidences.append(confidence_grid[i, j, k])
+    
+    enhanced_points = np.array(enhanced_points)
+    enhanced_colors = np.array(enhanced_colors)
+    enhanced_confidences = np.array(enhanced_confidences)
+    
+    print(f"   Enhanced points: {len(enhanced_points)}")
+    print(f"   Enhancement ratio: {len(enhanced_points) / len(points):.2f}x")
+    
+    return enhanced_points, enhanced_colors, enhanced_confidences
+
+
+def reconstruct_surface_poisson(points, colors, confidences, depth=8, width=0, scale=1.1):
+    """
+    Reconstruct surface using Poisson reconstruction algorithm
+    
+    Args:
+        points: Nx3 array of 3D coordinates
+        colors: Nx3 array of RGB colors (0-1 range)
+        confidences: N array of confidence values
+        depth: Octree depth (higher = more detail)
+        width: Width parameter for reconstruction
+        scale: Scale parameter for reconstruction
+    
+    Returns:
+        vertices, faces, vertex_colors
+    """
+    print(f"🔧 Reconstructing surface using Poisson method...")
+    print(f"   Input points: {len(points)}")
+    print(f"   Octree depth: {depth}")
+    
+    try:
+        # Try to use Open3D for Poisson reconstruction
+        import open3d as o3d
+        
+        # Create Open3D point cloud
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+        
+        # Estimate normals
+        pcd.estimate_normals()
+        
+        # Poisson reconstruction
+        mesh, _ = pcd.create_mesh_poisson(depth=depth, width=width, scale=scale)
+        
+        # Extract vertices and faces
+        vertices = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.triangles)
+        
+        # Get vertex colors (interpolated from point cloud)
+        vertex_colors = []
+        for vertex in vertices:
+            # Find nearest point for color assignment
+            distances = np.linalg.norm(points - vertex, axis=1)
+            nearest_idx = np.argmin(distances)
+            vertex_colors.append(colors[nearest_idx])
+        
+        vertex_colors = np.array(vertex_colors)
+        
+        print(f"   Generated mesh: {len(vertices)} vertices, {len(faces)} faces")
+        
+        return vertices, faces, vertex_colors
+        
+    except ImportError:
+        print("   ⚠️  Open3D not available, using Delaunay triangulation fallback")
+        return reconstruct_surface_delaunay(points, colors, confidences)
+
+
+def reconstruct_surface_delaunay(points, colors, confidences, max_points=10000):
+    """
+    Reconstruct surface using Delaunay triangulation (fallback method)
+    
+    Args:
+        points: Nx3 array of 3D coordinates
+        colors: Nx3 array of RGB colors (0-1 range)
+        confidences: N array of confidence values
+        max_points: Maximum points for triangulation (performance limit)
+    
+    Returns:
+        vertices, faces, vertex_colors
+    """
+    print(f"🔧 Reconstructing surface using Delaunay triangulation...")
+    print(f"   Input points: {len(points)}")
+    
+    # Subsample for performance
+    if len(points) > max_points:
+        indices = np.random.choice(len(points), max_points, replace=False)
+        points = points[indices]
+        colors = colors[indices]
+        confidences = confidences[indices]
+        print(f"   Subsampled to {max_points} points for triangulation")
+    
+    # Project to 2D for Delaunay triangulation
+    # Use PCA to find the best 2D projection
+    from sklearn.decomposition import PCA
+    pca = PCA(n_components=2)
+    points_2d = pca.fit_transform(points)
+    
+    # Perform Delaunay triangulation in 2D
+    tri = Delaunay(points_2d)
+    
+    # Convert 2D triangles to 3D faces
+    faces = tri.simplices
+    
+    # Vertices are the original 3D points
+    vertices = points
+    vertex_colors = colors
+    
+    print(f"   Generated mesh: {len(vertices)} vertices, {len(faces)} faces")
+    
+    return vertices, faces, vertex_colors
+
+
+def reconstruct_surface_alpha_shape(points, colors, confidences, alpha=None):
+    """
+    Reconstruct surface using alpha shapes
+    
+    Args:
+        points: Nx3 array of 3D coordinates
+        colors: Nx3 array of RGB colors (0-1 range)
+        confidences: N array of confidence values
+        alpha: Alpha parameter (auto-determined if None)
+    
+    Returns:
+        vertices, faces, vertex_colors
+    """
+    print(f"🔧 Reconstructing surface using alpha shapes...")
+    print(f"   Input points: {len(points)}")
+    
+    try:
+        from scipy.spatial import ConvexHull
+        from scipy.spatial.distance import pdist
+        
+        # Subsample for performance
+        max_points = 5000
+        if len(points) > max_points:
+            indices = np.random.choice(len(points), max_points, replace=False)
+            points = points[indices]
+            colors = colors[indices]
+            confidences = confidences[indices]
+            print(f"   Subsampled to {max_points} points for alpha shape")
+        
+        # Auto-determine alpha if not provided
+        if alpha is None:
+            distances = pdist(points)
+            alpha = np.percentile(distances, 10)  # Use 10th percentile as alpha
+            print(f"   Auto-determined alpha: {alpha:.4f}")
+        
+        # Create convex hull as approximation
+        hull = ConvexHull(points)
+        
+        vertices = points[hull.vertices]
+        faces = hull.simplices
+        
+        # Get colors for hull vertices
+        vertex_colors = colors[hull.vertices]
+        
+        print(f"   Generated mesh: {len(vertices)} vertices, {len(faces)} faces")
+        
+        return vertices, faces, vertex_colors
+        
+    except Exception as e:
+        print(f"   ⚠️  Alpha shape failed: {e}")
+        return reconstruct_surface_delaunay(points, colors, confidences)
+
+
+def visualize_mesh_interactive(vertices, faces, vertex_colors, title="3D Mesh"):
+    """
+    Create interactive 3D mesh visualization using Plotly
+    
+    Args:
+        vertices: Nx3 array of vertex coordinates
+        faces: Mx3 array of face indices
+        vertex_colors: Nx3 array of vertex colors (0-1 range)
+        title: Plot title
+    
+    Returns:
+        plotly figure
+    """
+    print(f"🎨 Creating interactive 3D mesh visualization...")
+    print(f"   Vertices: {len(vertices)}, Faces: {len(faces)}")
+    
+    # Convert colors to RGB format for Plotly
+    colors_rgb = (vertex_colors * 255).astype(int)
+    colors_str = [f'rgb({r},{g},{b})' for r, g, b in colors_rgb]
+    
+    # Create mesh trace
+    mesh_trace = go.Mesh3d(
+        x=vertices[:, 0],
+        y=vertices[:, 1],
+        z=vertices[:, 2],
+        i=faces[:, 0],
+        j=faces[:, 1],
+        k=faces[:, 2],
+        vertexcolor=colors_str,
+        lighting=dict(ambient=0.7, diffuse=0.8, specular=0.2),
+        lightposition=dict(x=100, y=200, z=0),
+        name='Mesh'
+    )
+    
+    # Create figure
+    fig = go.Figure(data=[mesh_trace])
+    
+    # Update layout
+    fig.update_layout(
+        title=title,
+        scene=dict(
+            xaxis_title='X',
+            yaxis_title='Y',
+            zaxis_title='Z',
+            camera=dict(
+                eye=dict(x=1.5, y=1.5, z=1.5)
+            ),
+            aspectmode='data'
+        ),
+        width=800,
+        height=600
+    )
+    
+    return fig
+
+
+def save_mesh_obj(vertices, faces, vertex_colors, filename):
+    """
+    Save mesh as OBJ file
+    
+    Args:
+        vertices: Nx3 array of vertex coordinates
+        faces: Mx3 array of face indices (1-indexed for OBJ)
+        vertex_colors: Nx3 array of vertex colors (0-1 range)
+        filename: Output filename
+    """
+    print(f"💾 Saving mesh as OBJ: {filename}")
+    
+    with open(filename, 'w') as f:
+        # Write vertices with colors
+        for i, (vertex, color) in enumerate(zip(vertices, vertex_colors)):
+            f.write(f"v {vertex[0]:.6f} {vertex[1]:.6f} {vertex[2]:.6f} {color[0]:.6f} {color[1]:.6f} {color[2]:.6f}\n")
+        
+        # Write faces (1-indexed)
+        for face in faces:
+            f.write(f"f {face[0]+1} {face[1]+1} {face[2]+1}\n")
+    
+    print(f"   Saved {len(vertices)} vertices, {len(faces)} faces")
+
+
+def visualize_surface_reconstruction(filename, max_points=100000, method='poisson', interactive=True):
+    """
+    Visualize point cloud with surface reconstruction
+    
+    Args:
+        filename: PLY file path
+        max_points: Maximum points to process
+        method: Reconstruction method ('poisson', 'delaunay', 'alpha_shape')
+        interactive: Use interactive Plotly visualization
+    
+    Returns:
+        None
+    """
+    print(f"🔧 Surface Reconstruction Visualization")
+    print(f"   File: {filename}")
+    print(f"   Method: {method}")
+    print(f"   Interactive: {interactive}")
+    
+    # Load point cloud
+    points, colors, confidences = read_ply_file(filename)
+    
+    print(f"   Loaded {len(points)} points")
+    
+    # Subsample for performance
+    if len(points) > max_points:
+        indices = np.random.choice(len(points), max_points, replace=False)
+        points = points[indices]
+        colors = colors[indices]
+        confidences = confidences[indices]
+        print(f"   Subsampled to {max_points} points")
+    
+    # Reconstruct surface
+    if method == 'poisson':
+        vertices, faces, vertex_colors = reconstruct_surface_poisson(points, colors, confidences)
+    elif method == 'delaunay':
+        vertices, faces, vertex_colors = reconstruct_surface_delaunay(points, colors, confidences)
+    elif method == 'alpha_shape':
+        vertices, faces, vertex_colors = reconstruct_surface_alpha_shape(points, colors, confidences)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+    
+    # Save mesh
+    mesh_filename = filename.replace('.ply', f'_{method}_mesh.obj')
+    save_mesh_obj(vertices, faces, vertex_colors, mesh_filename)
+    
+    if interactive:
+        # Create interactive visualization
+        fig = visualize_mesh_interactive(vertices, faces, vertex_colors, f"Surface Reconstruction ({method})")
+        
+        # Save interactive HTML
+        html_filename = filename.replace('.ply', f'_{method}_mesh.html')
+        fig.write_html(html_filename)
+        print(f"💾 Saved interactive visualization: {html_filename}")
+        
+        # Show plot
+        fig.show()
+    else:
+        # Fallback to matplotlib
+        print("   Using matplotlib fallback (interactive disabled)")
+        visualize_ply(filename, max_points=max_points, enhance=False, comparison=False)
+
+
+
+def visualize_ply(filename, max_points=100000, enhance=True, comparison=True):
+    """Visualize PLY file with matplotlib, optionally enhanced with Gaussian interpolation"""
     print(f"Loading PLY file: {filename}")
     
     points, colors, confidences = read_ply_file(filename)
@@ -77,27 +472,102 @@ def visualize_ply(filename, max_points=100000):
         confidences = confidences[indices]
         print(f"Subsampled to {max_points} points for visualization")
     
-    # Create 3D plot
-    fig = plt.figure(figsize=(12, 8))
+    # Apply Gaussian enhancement if requested
+    if enhance:
+        try:
+            enhanced_points, enhanced_colors, enhanced_confidences = enhance_point_cloud_gaussian(
+                points, colors, confidences, voxel_size=0.005, sigma=0.3, max_points=50000
+            )
+            
+            # Create comparison plot
+            if comparison:
+                fig = plt.figure(figsize=(20, 10))
+            
+                # Plot 1: Original point cloud
+                ax1 = fig.add_subplot(221, projection='3d')
+                ax1.scatter(points[:, 0], points[:, 1], points[:, 2], 
+                            c=colors, s=1, alpha=0.6)
+                ax1.set_xlabel('X')
+                ax1.set_ylabel('Y')
+                ax1.set_zlabel('Z')
+                ax1.set_title(f'Original ({len(points):,} points)', fontsize=12, fontweight='bold')
+                
+                # Plot 2: Enhanced point cloud
+                ax2 = fig.add_subplot(222, projection='3d')
+                ax2.scatter(enhanced_points[:, 0], enhanced_points[:, 1], enhanced_points[:, 2], 
+                            c=enhanced_colors, s=1, alpha=0.6)
+                ax2.set_xlabel('X')
+                ax2.set_ylabel('Y')
+                ax2.set_zlabel('Z')
+                ax2.set_title(f'Gaussian Enhanced ({len(enhanced_points):,} points)', fontsize=12, fontweight='bold')
+                
+                # Plot 3: Original confidence
+                ax3 = fig.add_subplot(223, projection='3d')
+                scatter3 = ax3.scatter(points[:, 0], points[:, 1], points[:, 2], 
+                                      c=confidences, s=1, alpha=0.6, cmap='viridis')
+                ax3.set_xlabel('X')
+                ax3.set_ylabel('Y')
+                ax3.set_zlabel('Z')
+                ax3.set_title('Original Confidence', fontsize=12, fontweight='bold')
+                plt.colorbar(scatter3, ax=ax3, label='Confidence')
+                
+                # Plot 4: Enhanced confidence
+                ax4 = fig.add_subplot(224, projection='3d')
+                scatter4 = ax4.scatter(enhanced_points[:, 0], enhanced_points[:, 1], enhanced_points[:, 2], 
+                                      c=enhanced_confidences, s=1, alpha=0.6, cmap='viridis')
+                ax4.set_xlabel('X')
+                ax4.set_ylabel('Y')
+                ax4.set_zlabel('Z')
+                ax4.set_title('Enhanced Confidence', fontsize=12, fontweight='bold')
+                plt.colorbar(scatter4, ax=ax4, label='Confidence')
+                
+                # Add comparison stats
+                enhancement_ratio = len(enhanced_points) / len(points)
+                fig.suptitle(f'Point Cloud Enhancement Comparison - {enhancement_ratio:.1f}x more points', 
+                            fontsize=14, fontweight='bold')
+                
+                # Save comparison image
+                comparison_file = filename.replace('.ply', '_comparison.png')
+                plt.savefig(comparison_file, dpi=150, bbox_inches='tight')
+                print(f"💾 Saved comparison image: {comparison_file}")
+            else:
+                # Simple enhanced view without comparison
+                fig = plt.figure(figsize=(12, 8))
+                ax = fig.add_subplot(111, projection='3d')
+                ax.scatter(enhanced_points[:, 0], enhanced_points[:, 1], enhanced_points[:, 2], 
+                          c=enhanced_colors, s=1, alpha=0.6)
+                ax.set_xlabel('X')
+                ax.set_ylabel('Y')
+                ax.set_zlabel('Z')
+                ax.set_title(f'Enhanced Point Cloud ({len(enhanced_points):,} points)')
+            
+        except Exception as e:
+            print(f"⚠️  Enhancement failed: {e}")
+            print("   Falling back to original visualization")
+            enhance = False
     
-    # Plot 1: 3D point cloud with colors
-    ax1 = fig.add_subplot(121, projection='3d')
-    ax1.scatter(points[:, 0], points[:, 1], points[:, 2], 
-                c=colors, s=1, alpha=0.6)
-    ax1.set_xlabel('X')
-    ax1.set_ylabel('Y')
-    ax1.set_zlabel('Z')
-    ax1.set_title('3D Point Cloud (RGB)')
-    
-    # Plot 2: 3D point cloud colored by confidence
-    ax2 = fig.add_subplot(122, projection='3d')
-    scatter = ax2.scatter(points[:, 0], points[:, 1], points[:, 2], 
-                         c=confidences, s=1, alpha=0.6, cmap='viridis')
-    ax2.set_xlabel('X')
-    ax2.set_ylabel('Y')
-    ax2.set_zlabel('Z')
-    ax2.set_title('3D Point Cloud (Confidence)')
-    plt.colorbar(scatter, ax=ax2, label='Confidence')
+    if not enhance:
+        # Original visualization without enhancement
+        fig = plt.figure(figsize=(12, 8))
+        
+        # Plot 1: 3D point cloud with colors
+        ax1 = fig.add_subplot(121, projection='3d')
+        ax1.scatter(points[:, 0], points[:, 1], points[:, 2], 
+                    c=colors, s=1, alpha=0.6)
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_zlabel('Z')
+        ax1.set_title('3D Point Cloud (RGB)')
+        
+        # Plot 2: 3D point cloud colored by confidence
+        ax2 = fig.add_subplot(122, projection='3d')
+        scatter = ax2.scatter(points[:, 0], points[:, 1], points[:, 2], 
+                             c=confidences, s=1, alpha=0.6, cmap='viridis')
+        ax2.set_xlabel('X')
+        ax2.set_ylabel('Y')
+        ax2.set_zlabel('Z')
+        ax2.set_title('3D Point Cloud (Confidence)')
+        plt.colorbar(scatter, ax=ax2, label='Confidence')
     
     plt.tight_layout()
     plt.show()
@@ -297,8 +767,18 @@ if __name__ == "__main__":
     ply_file = None
     temp_file = None
     
-    # If no arguments, find the most recent reconstruction
-    if len(sys.argv) < 2:
+    # Parse command line arguments
+    args = sys.argv[1:]
+    ply_file_arg = None
+    
+    # Look for PLY file argument (not starting with --)
+    for arg in args:
+        if not arg.startswith('--'):
+            ply_file_arg = arg
+            break
+    
+    # If no PLY file specified, find the most recent reconstruction
+    if ply_file_arg is None:
         print("🔍 No file specified, looking for most recent reconstruction...")
         
         # Check S3 first (most common for GPU inference)
@@ -316,16 +796,26 @@ if __name__ == "__main__":
                 print(f"✅ Found latest local PLY: {ply_file}")
             else:
                 print("\n❌ No PLY files found")
-                print("\nUsage: python view_ply.py [ply_file] [max_points]")
-                print("\nExamples:")
-                print("  python view_ply.py                              # Open latest")
+                print("\nUsage: python view_ply.py [ply_file] [max_points] [options]")
+                print("\nPoint Cloud Visualization:")
+                print("  python view_ply.py                              # Open latest with comparison")
                 print("  python view_ply.py point_clouds/frame_000001.ply")
                 print("  python view_ply.py output.ply 500000            # Show 500k points")
                 print("  python view_ply.py s3://bucket/path/to/file.ply # From S3")
+                print("  python view_ply.py output.ply --no-enhance     # Disable Gaussian enhancement")
+                print("  python view_ply.py output.ply --no-comparison  # Enhanced view only")
+                print("\nSurface Reconstruction:")
+                print("  python view_ply.py output.ply --surface        # Poisson reconstruction")
+                print("  python view_ply.py output.ply --surface --method=delaunay  # Delaunay triangulation")
+                print("  python view_ply.py output.ply --surface --method=alpha_shape  # Alpha shapes")
+                print("  python view_ply.py output.ply --surface --no-interactive  # Static visualization")
                 print("\nNote: Will use CloudCompare if installed, otherwise matplotlib")
+                print("      Gaussian enhancement fills gaps in point clouds for better visualization")
+                print("      Surface reconstruction creates 3D meshes from point clouds")
+                print("      Interactive mode uses Plotly for 3D mesh visualization")
                 sys.exit(1)
     else:
-        ply_file = sys.argv[1]
+        ply_file = ply_file_arg
     
     # Check if it's an S3 path
     if ply_file.startswith('s3://'):
@@ -373,8 +863,34 @@ if __name__ == "__main__":
     print("")
     
     try:
-        max_points = int(sys.argv[2]) if len(sys.argv) > 2 else 100000
-        visualize_ply(ply_file, max_points=max_points)
+        # Parse arguments for max_points, enhance, comparison, and surface reconstruction
+        max_points = 100000
+        enhance = True
+        comparison = True
+        surface_reconstruction = False
+        reconstruction_method = 'poisson'
+        interactive = True
+        
+        for arg in args:
+            if arg.isdigit():
+                max_points = int(arg)
+            elif arg == '--no-enhance':
+                enhance = False
+            elif arg == '--no-comparison':
+                comparison = False
+            elif arg == '--surface':
+                surface_reconstruction = True
+            elif arg.startswith('--method='):
+                reconstruction_method = arg.split('=')[1]
+            elif arg == '--no-interactive':
+                interactive = False
+        
+        # Choose visualization method
+        if surface_reconstruction:
+            visualize_surface_reconstruction(ply_file, max_points=max_points, 
+                                           method=reconstruction_method, interactive=interactive)
+        else:
+            visualize_ply(ply_file, max_points=max_points, enhance=enhance, comparison=comparison)
     finally:
         # Clean up temp file after matplotlib viewing
         if temp_file and os.path.exists(temp_file):

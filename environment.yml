@@ -6,6 +6,7 @@ dependencies:
   - python=3.9
   - numpy
   - opencv
+  - scipy
   - pip
   - pip:
     - boto3
@@ -18,3 +19,5 @@ dependencies:
     - huggingface_hub
     - safetensors
     - roma
+    - plotly
+    - open3d
