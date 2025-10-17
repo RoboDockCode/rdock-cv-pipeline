@@ -18,3 +18,10 @@ dependencies:
     - huggingface_hub
     - safetensors
     - roma
+    # MASt3R-SLAM dependencies
+    - plyfile
+    - natsort
+    - evo
+    - git+https://github.com/princeton-vl/lietorch.git
+    # Optional: pyrealsense2 (for live camera support, not needed for MP4 processing)
+    # - pyrealsense2

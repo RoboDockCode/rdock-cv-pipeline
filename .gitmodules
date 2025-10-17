@@ -1,3 +1,6 @@
 [submodule "models/mast3r"]
 	path = models/mast3r
 	url = https://github.com/naver/mast3r.git
+[submodule "models/mast3r-slam"]
+	path = models/mast3r-slam
+	url = https://github.com/rmurai0610/MASt3R-SLAM.git

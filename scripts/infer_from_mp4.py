@@ -23,6 +23,7 @@ except ImportError as e:
     sys.exit(1)
 
 from scripts.realistic_reconstruction_simple import RealisticReconstructor
+from frame_processing_pipeline.slam_processor import SLAMReconstructor
 
 
 def get_latest_mp4_from_s3(bucket_name):
@@ -140,7 +141,7 @@ def extract_frames_from_mp4(mp4_path, output_dir, fps=2):
     return extracted_frames
 
 
-def upload_result_to_s3(ply_path, bucket_name, job_id):
+def upload_result_to_s3(ply_path, bucket_name, job_id, trajectory_path=None):
     """Upload reconstruction result to S3"""
     print(f"\n📤 Uploading result to S3...")
     
@@ -154,7 +155,17 @@ def upload_result_to_s3(ply_path, bucket_name, job_id):
         s3_client.upload_file(ply_path, bucket_name, s3_key)
         
         file_size = os.path.getsize(ply_path) / 1024 / 1024
-        print(f"✅ Uploaded: {file_size:.2f} MB")
+        print(f"✅ Uploaded PLY: {file_size:.2f} MB")
+        
+        # Upload trajectory if provided (SLAM mode)
+        if trajectory_path and os.path.exists(trajectory_path):
+            traj_s3_key = f"output/{job_id}/trajectory.txt"
+            print(f"   Trajectory: {trajectory_path}")
+            print(f"   To: s3://{bucket_name}/{traj_s3_key}")
+            s3_client.upload_file(trajectory_path, bucket_name, traj_s3_key)
+            traj_size = os.path.getsize(trajectory_path) / 1024
+            print(f"✅ Uploaded trajectory: {traj_size:.2f} KB")
+        
         print(f"\n📥 Download with:")
         print(f"   aws s3 cp s3://{bucket_name}/{s3_key} ./")
         print(f"\n🎨 Visualize with:")
@@ -195,6 +206,12 @@ def main():
         action='store_true',
         help='Keep temporary files (MP4 and frames) after processing'
     )
+    parser.add_argument(
+        '--mode', '-m',
+        choices=['batch', 'slam'],
+        default='batch',
+        help='Reconstruction mode: batch (global MASt3R, better quality) or slam (sequential, memory efficient, with trajectory)'
+    )
     
     args = parser.parse_args()
     
@@ -204,6 +221,11 @@ def main():
     print(f"📥 Input bucket: {args.input_bucket}")
     print(f"📤 Output bucket: {args.output_bucket}")
     print(f"🎞️  Target FPS: {args.fps}")
+    print(f"🔧 Mode: {args.mode.upper()}")
+    if args.mode == 'batch':
+        print(f"   └─ Global MASt3R (best quality)")
+    else:
+        print(f"   └─ Sequential SLAM (memory efficient + trajectory)")
     print("=" * 70)
     
     # Create temporary directory
@@ -232,28 +254,53 @@ def main():
             print("❌ Frame extraction failed")
             return 1
         
-        # Step 3: Run MAST3R reconstruction
+        # Step 3: Run reconstruction (SLAM or batch)
         print("\n" + "=" * 70)
-        print("🧠 RUNNING MAST3R RECONSTRUCTION")
+        if args.mode == 'slam':
+            print("🧠 RUNNING MAST3R-SLAM RECONSTRUCTION")
+        else:
+            print("🧠 RUNNING MAST3R RECONSTRUCTION (BATCH)")
         print("=" * 70)
-        
-        reconstructor = RealisticReconstructor()
-        if reconstructor.model is None:
-            print("❌ Failed to load MAST3R model")
-            return 1
         
         # Generate job ID from timestamp
         job_id = f"job_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         output_ply = os.path.join(temp_dir, 'reconstruction.ply')
+        trajectory_path = None
         
-        result = reconstructor.reconstruct(frames, output_ply)
-        
-        if not result:
-            print("❌ Reconstruction failed")
-            return 1
+        if args.mode == 'slam':
+            # Use SLAM reconstructor
+            reconstructor = SLAMReconstructor()
+            if reconstructor.model is None:
+                print("❌ Failed to load MASt3R-SLAM model")
+                return 1
+            
+            result = reconstructor.reconstruct(frames, output_ply)
+            
+            if not result or not result['success']:
+                print("❌ SLAM reconstruction failed")
+                return 1
+            
+            output_ply = result['ply']
+            trajectory_path = result['trajectory']
+            print(f"\n✅ Generated {result['num_keyframes']} keyframes")
+            print(f"✅ Reconstructed {result['num_points']:,} points")
+        else:
+            # Use batch reconstructor
+            reconstructor = RealisticReconstructor()
+            if reconstructor.model is None:
+                print("❌ Failed to load MAST3R model")
+                return 1
+            
+            result = reconstructor.reconstruct(frames, output_ply)
+            
+            if not result:
+                print("❌ Reconstruction failed")
+                return 1
+            
+            output_ply = result
         
         # Step 4: Upload result to S3
-        if not upload_result_to_s3(result, args.output_bucket, job_id):
+        if not upload_result_to_s3(output_ply, args.output_bucket, job_id, trajectory_path):
             return 1
         
         print("\n" + "=" * 70)
