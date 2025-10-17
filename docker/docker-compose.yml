@@ -32,18 +32,13 @@ services:
     
     # Volume mounts for data persistence
     volumes:
-      # Input images
-      - ../captures:/app/captures
       # Output PLY files
       - ../outputs:/app/outputs
-      # Point clouds (intermediate)
-      - ../point_clouds:/app/point_clouds
       # Model cache (persistent across rebuilds)
       - model-cache:/root/.cache
       # Development: Mount scripts for live editing
       - ../scripts:/app/scripts
       - ../frame_processing_pipeline:/app/frame_processing_pipeline
-      - ../process_captures.py:/app/process_captures.py
     
     # Network (for future API)
     ports:
