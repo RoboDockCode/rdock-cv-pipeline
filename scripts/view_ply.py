@@ -102,8 +102,8 @@ def visualize_ply(filename, max_points=100000):
     plt.tight_layout()
     plt.show()
 
-def find_latest_s3_reconstruction(bucket_name="frame-storage", prefix="output/reconstructions"):
-    """Find the most recent reconstruction in S3"""
+def find_latest_s3_reconstruction(bucket_name="frame-storage", prefix="output"):
+    """Find the most recent reconstruction in S3 (output/job_*/reconstruction.ply)"""
     try:
         import boto3
         from datetime import datetime
@@ -113,7 +113,7 @@ def find_latest_s3_reconstruction(bucket_name="frame-storage", prefix="output/re
     try:
         s3_client = boto3.client('s3')
         
-        # List all jobs
+        # List all jobs in output/ directory
         response = s3_client.list_objects_v2(
             Bucket=bucket_name,
             Prefix=prefix + '/',
@@ -123,13 +123,17 @@ def find_latest_s3_reconstruction(bucket_name="frame-storage", prefix="output/re
         if 'CommonPrefixes' not in response:
             return None
         
-        # Get all job directories
+        # Get all job directories (output/job_*)
         jobs = []
         for prefix_obj in response['CommonPrefixes']:
             job_prefix = prefix_obj['Prefix']
             job_id = job_prefix.rstrip('/').split('/')[-1]
             
-            # List PLY files in this job
+            # Only process job_* directories
+            if not job_id.startswith('job_'):
+                continue
+            
+            # List PLY files in this job directory
             files_response = s3_client.list_objects_v2(
                 Bucket=bucket_name,
                 Prefix=job_prefix
