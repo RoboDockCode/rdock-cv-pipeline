@@ -99,7 +99,3 @@ Use decoupled workflow:
 
 ### Cloud-Only Processing
 Upload pre-recorded videos to S3, run inference in batch on GPU instances.
-
-## License
-
-[Add your license here]
